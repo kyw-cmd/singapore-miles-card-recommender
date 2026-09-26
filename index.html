@@ -1,124 +1,29 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Singapore Miles Card Recommender</title>
-<style>
-:root{--bg:#f5f7fb;--card:#fff;--ink:#172033;--muted:#667085;--accent:#183b70;--good:#08783e;--warn:#a15c00;--line:#d9e0ea}
-*{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
-.wrap{max-width:980px;margin:auto;padding:18px}.hero{background:linear-gradient(135deg,#17365f,#285b91);color:#fff;padding:22px;border-radius:16px;margin-bottom:14px}
-h1{font-size:24px;margin:0 0 6px}.hero p{margin:0;opacity:.9}.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.full{grid-column:1/-1}
-label{font-size:12px;font-weight:700;color:#475467;display:block;margin-bottom:5px} input,select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;font-size:15px;background:#fff}
-button{width:100%;padding:12px;border:0;border-radius:10px;background:#183b70;color:#fff;font-weight:750;font-size:15px;cursor:pointer}
-.result{border-left:5px solid var(--accent);padding:12px 14px;background:#f8fbff;border-radius:8px;margin:10px 0}.best{border-left-color:var(--good);background:#f2fbf6}
-.rtitle{font-size:17px;font-weight:800}.mpd{font-size:22px;font-weight:850;color:var(--good)}.muted{color:var(--muted);font-size:13px}.warn{color:var(--warn);font-weight:700}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#f0f4f8}
-details{margin-top:10px} a{color:#174e8a}.tag{display:inline-block;background:#eaf0f7;border-radius:999px;padding:3px 7px;margin:2px;font-size:11px}
-@media(max-width:650px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.wrap{padding:10px}.hero{border-radius:12px}table{font-size:12px}}
-</style>
-</head>
-<body><div class="wrap">
-<div class="hero"><h1>Singapore Miles Card Recommender</h1><p>Prototype for C and M - choose merchant, transaction type and payment method; the engine ranks cards by expected miles and cap availability.</p></div>
-
-<div class="panel">
-<div class="grid">
-<div><label>Cardholder</label><select id="holder"><option>C</option><option>M</option></select></div>
-<div><label>Amount (SGD)</label><input id="amount" type="number" value="100" min="0" step="0.01"></div>
-<div class="full"><label>Merchant / store</label><input id="merchant" placeholder="e.g. Grab, Klook, Shopee, Singapore Airlines"></div>
-<div><label>Category</label><select id="category">
-<option>Dining</option><option>Travel</option><option>Shopping</option><option>Groceries</option><option>Transport</option><option>Family</option><option>Entertainment</option><option>Other</option>
-</select></div>
-<div><label>Transaction channel</label><select id="channel"><option>Online</option><option>In-store</option></select></div>
-<div><label>Payment method</label><select id="payment"><option>Card details / physical card</option><option>Mobile contactless (Apple/Google/Samsung Pay)</option><option>Physical contactless</option><option>SimplyGo</option></select></div>
-<div><label>Foreign currency?</label><select id="fx"><option value="no">No</option><option value="yes">Yes</option></select></div>
-<div><label>Known MCC (optional)</label><input id="mcc" placeholder="e.g. 5812"></div>
-<div><label>Bonus-cap spend already used this month (SGD)</label><input id="used" type="number" value="0" min="0"></div>
-<div><label>Lady's Savings Account MAB</label><select id="ladyMab"><option value="0">&lt; S$10k / none</option><option value="10000">S$10k-49,999</option><option value="50000">S$50k-99,999</option><option value="100000">S$100k+</option></select></div>
-<div class="full"><button onclick="recommend()">Recommend card</button></div>
-</div></div>
-
-<div id="out" class="panel"><b>Enter a purchase above.</b><div class="muted">The tool asks rather than guesses where eligibility depends on payment method, category or MCC.</div></div>
-
-<div class="panel"><h2 style="font-size:18px;margin-top:0">Built-in portfolio and rule set</h2>
-<table><thead><tr><th>Card</th><th>Core rule used by prototype</th><th>Bonus cap model</th></tr></thead><tbody id="rules"></tbody></table>
-<details><summary><b>Important limitations</b></summary><p class="muted">Merchant category codes are assigned by acquiring banks and can differ from a merchant's apparent business. Promotions and exclusions change. This prototype therefore exposes the rule assumptions and links to bank sources; confirm high-value transactions against current terms. “Miles” means the airline-mile equivalent of bank points where applicable.</p></details>
-</div>
-</div>
-<script>
-const sources={
- dbs:"https://www.dbs.com.sg/personal/cards/credit-cards/dbs-woman-mastercard-card",
- yuu:"https://www.dbs.com.sg/personal/cards/credit-cards/dbs-yuu-cards",
- uobLady:"https://www.uob.com.sg/personal/cards/rewards/ladys-card/index.page",
- uobPV:"https://www.uob.com.sg/personal/cards/rewards/preferred-visa-card.page",
- uobKF:"https://www.uob.com.sg/personal/cards/travel/krisflyer-card.page",
- citiRewards:"https://www.citibank.com.sg/credit-cards/rewards/citi-rewards-card/",
- citiPM:"https://www.citibank.com.sg/credit-cards",
- hsbc:"https://www.hsbc.com.sg/credit-cards/products/revolution/",
- amex:"https://www.americanexpress.com/en-sg/campaigns/krisflyer-card/",
- ocbc:"https://www.ocbc.com/personal-banking/cards/credit-card"
-};
-const portfolio={
- C:["OCBC Rewards","DBS Woman's World","Amex KrisFlyer","Citi PremierMiles","Citi Rewards","HSBC Revolution","UOB Lady's Solitaire","UOB Preferred Visa","KrisFlyer UOB"],
- M:["Citi Rewards","UOB Lady's Solitaire","UOB Preferred Visa","DBS yuu"]
-};
-const merchantMap=[
- [/singapore airlines|singaporeair|scoot|krisshop|pelago/i,"Travel"],
- [/klook|agoda|booking\.com|trip\.com|expedia|airbnb|hotel/i,"Travel"],
- [/grab|gojek|taxi|comfortdelgro/i,"Transport"],
- [/foodpanda|deliveroo/i,"Dining"],
- [/shopee|lazada|amazon|taobao|uniqlo|zara|department/i,"Shopping"],
- [/cold storage|cs fresh|giant|fairprice|ntuc|sheng siong/i,"Groceries"],
- [/guardian|watsons/i,"Shopping"]
-];
-function inferCategory(name,current){
- for(const [rx,cat] of merchantMap) if(rx.test(name)) return cat;
- return current;
-}
-function ladyRate(mab){mab=+mab;if(mab>=100000)return 10;if(mab>=50000)return 8;if(mab>=10000)return 6;return 4}
-function eligibleHSBC(cat){return ["Dining","Travel","Shopping","Transport","Entertainment"].includes(cat)}
-function evalCard(card,x){
- let mpd=.4, cap=Infinity, reason="Base earn / fallback", ok=true, src="", caveat="";
- const online=x.channel==="Online", mobile=x.payment.startsWith("Mobile"), simply=x.payment==="SimplyGo";
- if(card==="DBS Woman's World"){src=sources.dbs; mpd=online?4:(x.fx?1.2:.4);cap=online?1000:Infinity;reason=online?"4 mpd online":"Non-online earn rate";}
- if(card==="Citi Rewards"){src=sources.citiRewards; let q=(online && x.category!=="Travel" && !mobile)||(!online && x.category==="Shopping");mpd=q?4:.4;cap=q?1000:Infinity;reason=q?"10X eligible online/in-store shopping":"Not a 10X transaction";if(online&&x.category==="Travel")caveat="Online travel is excluded from 10X.";}
- if(card==="HSBC Revolution"){src=sources.hsbc;let q=(online||mobile||x.payment==="Physical contactless")&&eligibleHSBC(x.category);mpd=q?4:.4;cap=q?1000:Infinity;reason=q?"10X selected contactless/online MCC":"Outside selected bonus channel/category";}
- if(card==="UOB Preferred Visa"){src=sources.uobPV;let q=(mobile||simply||(online&&["Shopping","Entertainment"].includes(x.category)));mpd=q?4:.4;cap=q?600:Infinity;reason=q?"4 mpd eligible mobile contactless / selected online":"Outside bonus channel";caveat=q?"Prototype applies the S$600 per-category bonus-cap equivalent; selected-online and mobile-contactless caps are separate.":"";}
- if(card==="UOB Lady's Solitaire"){src=sources.uobLady;let prefs=x.holder==="C"?["Dining","Travel"]:["Dining","Family"];let q=prefs.includes(x.category);mpd=q?ladyRate(x.ladyMab):.4;cap=q?750:Infinity;reason=q?`${mpd} mpd in selected ${x.category} category`:"Not one of this holder's selected Lady's categories";caveat=q?"Each selected category is capped at S$750 bonus-eligible spend per calendar month.":"";}
- if(card==="KrisFlyer UOB"){src=sources.uobKF;if(/singapore airlines|scoot|krisshop|kris\+|pelago/i.test(x.merchant)){mpd=3;reason="SIA Group / Kris+ / Pelago earn";}else if(["Dining","Travel","Transport","Shopping"].includes(x.category)){mpd=2.4;reason="Accelerated category, subject to S$1,000 annual SIA/Scoot/KrisShop spend";caveat="If annual qualifying SIA-group spend is not met, this category may earn only 1.2 mpd."}else{mpd=1.2;reason="General spend";}}
- if(card==="Citi PremierMiles"){src=sources.citiPM;mpd=x.fx?2.2:1.2;reason=x.fx?"Foreign-currency general earn":"Local general earn";}
- if(card==="Amex KrisFlyer"){src=sources.amex;if(/singapore airlines|scoot|krisshop|pelago/i.test(x.merchant)){mpd=2;reason="Eligible SIA/Scoot/KrisShop/Pelago";}else if(/grab/i.test(x.merchant)){mpd=2;cap=200;reason="Eligible Grab Singapore spend";}else{mpd=1.2;reason="General spend";}}
- if(card==="OCBC Rewards"){src=sources.ocbc;let q=x.category==="Shopping";mpd=q?4:.4;cap=q?1000:Infinity;reason=q?"Retail-category bonus assumption":"Outside retail bonus categories";caveat=q?"Exact eligibility is MCC/merchant dependent; selected quarterly merchants can earn more.":"";}
- if(card==="DBS yuu"){src=sources.yuu;let y=/cold storage|cs fresh|giant|guardian|7-eleven|foodpanda|gojek|chagee|singtel/i.test(x.merchant)||simply;mpd=y?2.8:.14;reason=y?"Participating yuu merchant base rewards":"Non-yuu merchant base equivalent";caveat=y?"Can rise to 10 mpd equivalent when monthly S$800 + 4 participating-merchant conditions are met; prototype conservatively uses 2.8 mpd unless those conditions are tracked.":"";}
- let remaining=cap===Infinity?Infinity:Math.max(0,cap-x.used);
- let bonusAmount=cap===Infinity?x.amount:Math.min(x.amount,remaining);
- let fallback=.4;
- let miles=bonusAmount*mpd+(x.amount-bonusAmount)*fallback;
- if(cap!==Infinity && remaining<=0){caveat=(caveat+" Bonus cap appears exhausted based on the amount entered.").trim();}
- return {card,mpd,miles,cap,remaining,reason,caveat,src};
-}
-function recommend(){
- const merchant=document.getElementById("merchant").value.trim();
- let cat=document.getElementById("category").value; cat=inferCategory(merchant,cat); document.getElementById("category").value=cat;
- const x={holder:holder.value,amount:+amount.value||0,merchant,category:cat,channel:channel.value,payment:payment.value,fx:fx.value==="yes",mcc:mcc.value.trim(),used:+used.value||0,ladyMab:+ladyMab.value};
- let rs=portfolio[x.holder].map(c=>evalCard(c,x)).sort((a,b)=>b.miles-a.miles||b.mpd-a.mpd);
- let h=`<h2 style="font-size:18px;margin-top:0">Recommendation</h2><div class="muted">Interpreted category: <b>${cat}</b>${x.mcc?` · MCC ${x.mcc}`:""}</div>`;
- rs.slice(0,4).forEach((r,i)=>{h+=`<div class="result ${i===0?"best":""}"><div class="rtitle">${i===0?"Primary: ":"Backup: "}${r.card}</div><div><span class="mpd">${r.mpd.toFixed(1)} mpd</span> · approx. <b>${r.miles.toFixed(0)} miles</b> on S$${x.amount.toFixed(2)}</div><div>${r.reason}</div>${r.cap!==Infinity?`<div class="muted">Modelled bonus cap: S$${r.cap}; remaining before purchase: S$${r.remaining.toFixed(0)}</div>`:""}${r.caveat?`<div class="warn">${r.caveat}</div>`:""}<div class="muted"><a href="${r.src}" target="_blank" rel="noopener">Bank source</a></div></div>`});
- h+=`<div class="muted">Decision logic prioritises expected miles after modelled caps. For an unfamiliar merchant, confirm its MCC or keep the conservative category selection rather than relying on the merchant name alone.</div>`;
- document.getElementById("out").innerHTML=h;
-}
-const ruleRows=[
- ["DBS Woman's World","4 mpd online; S$1,000 monthly online bonus-spend cap."],
- ["Citi Rewards","4 mpd equivalent on eligible online purchases (travel/mobile-wallet exclusions) and eligible in-store shopping; S$1,000 bonus-spend equivalent per statement month."],
- ["HSBC Revolution","Up to 4 mpd on selected contactless/online MCCs; S$1,000 bonus-spend equivalent per calendar month for standard tier."],
- ["UOB Preferred Visa","4 mpd on eligible mobile contactless and selected online spend; prototype models S$600 bonus-spend cap per category."],
- ["UOB Lady's Solitaire","4 mpd in two selected categories; up to 6/8/10 mpd with qualifying Lady's Savings MAB; S$750 per selected category monthly."],
- ["KrisFlyer UOB","3 mpd on SIA/Scoot/KrisShop/Kris+/Pelago; 2.4 mpd on specified categories if annual SIA-group condition is met; 1.2 otherwise."],
- ["Citi PremierMiles","1.2 mpd local; 2.2 mpd foreign currency."],
- ["Amex KrisFlyer","1.2 mpd general; 2 mpd on eligible SIA-group and selected Grab spend."],
- ["OCBC Rewards","4 mpd equivalent on qualifying retail categories; exact MCC/merchant eligibility applies."],
- ["DBS yuu","2.8 mpd equivalent at participating yuu merchants without min spend; up to 10 mpd equivalent if monthly conditions are met."]
-];
-document.getElementById("rules").innerHTML=ruleRows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>Tracked where material in recommendation engine</td></tr>`).join("");
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Which Card?</title><style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#111827;--muted:#667085;--blue:#123c69;--green:#08783e;--line:#e3e7ed}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif}.wrap{max-width:760px;margin:auto;padding:18px}.top{padding:18px 2px 8px}h1{font-size:30px;margin:0 0 5px}.sub{color:var(--muted)}.box{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;margin:14px 0;box-shadow:0 3px 16px #00000008}.search{position:relative}.search input{width:100%;font-size:20px;padding:17px 18px;border:2px solid #cdd5df;border-radius:14px;outline:none}.search input:focus{border-color:var(--blue)}.suggest{position:absolute;left:0;right:0;top:64px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;z-index:5;box-shadow:0 8px 25px #0002}.suggest div{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}.suggest div:last-child{border:0}.suggest div:hover{background:#f5f8fb}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}label{font-size:12px;font-weight:700;color:#475467;display:block;margin-bottom:5px}select,input[type=number]{width:100%;padding:11px;border:1px solid #ccd5df;border-radius:10px;background:white;font-size:15px}.result{display:none}.merchantline{display:flex;justify-content:space-between;gap:10px;align-items:center}.pill{background:#edf2f7;padding:5px 9px;border-radius:999px;font-size:12px}.primary{border:2px solid #b7dfc7;background:#f4fbf6;border-radius:16px;padding:17px;margin-top:12px}.eyebrow{font-size:12px;font-weight:800;color:var(--green);text-transform:uppercase;letter-spacing:.04em}.cardname{font-size:23px;font-weight:850;margin:4px 0}.mpd{font-size:31px;font-weight:900;color:var(--green)}.why{margin-top:9px;color:#344054}.backup{margin-top:12px;padding:13px;border:1px solid var(--line);border-radius:13px}.ask{display:none;background:#fff8e8;border:1px solid #f0d493;border-radius:13px;padding:13px;margin-top:12px}.ask button{border:1px solid #c9a75d;background:#fff;border-radius:9px;padding:9px 12px;margin:7px 5px 0 0;font-weight:700}.muted{color:var(--muted);font-size:13px}details{margin-top:14px}.advanced{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}@media(max-width:600px){.wrap{padding:12px}h1{font-size:27px}.row,.advanced{grid-template-columns:1fr}.cardname{font-size:21px}}
+</style></head><body><main class="wrap"><div class="top"><h1>Which card should I use?</h1><div class="sub">Start with the merchant. The recommendation updates automatically.</div></div>
+<div class="box"><div class="search"><input id="merchant" autocomplete="off" placeholder="Try Klook, Grab, Shopee, Sushiro…"><div id="suggest" class="suggest" style="display:none"></div></div><div class="row"><div><label>Cardholder</label><select id="holder"><option>C</option><option>M</option></select></div><div><label>Purchase amount (optional)</label><input id="amount" type="number" min="0" step="0.01" placeholder="S$"></div></div></div>
+<section id="result" class="box result"><div class="merchantline"><div><b id="mname"></b><div id="meta" class="muted"></div></div><span id="cat" class="pill"></span></div><div id="ask" class="ask"></div><div id="primary" class="primary"></div><div id="backup" class="backup"></div><details><summary><b>Why this recommendation?</b></summary><div id="explain" class="why"></div></details><details><summary>Advanced / override assumptions</summary><div class="advanced"><div><label>Payment method</label><select id="payment"><option value="auto">Auto-detect</option><option value="mobile">Mobile contactless</option><option value="physical">Physical card/contactless</option><option value="online">Online card payment</option><option value="simplygo">SimplyGo</option></select></div><div><label>Monthly bonus spend already used</label><input id="used" type="number" min="0" value="0"></div><div><label>Lady's Savings MAB</label><select id="mab"><option value="0">Below S$10k / none</option><option value="10000">S$10k+</option><option value="50000">S$50k+</option><option value="100000">S$100k+</option></select></div></div></details></section>
+<div class="muted">Prototype rule engine. Merchant MCCs and issuer exclusions can override apparent categories; verify unusually large purchases against current issuer terms.</div></main><script>
+const merchants=[
+{name:'Klook',aliases:['klook'],cat:'Travel',mode:'online'}, {name:'Grab',aliases:['grab'],cat:'Transport',mode:'app'}, {name:'Shopee',aliases:['shopee'],cat:'Shopping',mode:'online'}, {name:'Lazada',aliases:['lazada'],cat:'Shopping',mode:'online'}, {name:'Amazon',aliases:['amazon'],cat:'Shopping',mode:'online'}, {name:'Singapore Airlines',aliases:['sia','singapore airlines'],cat:'Travel',mode:'online',sia:true}, {name:'Scoot',aliases:['scoot'],cat:'Travel',mode:'online',sia:true}, {name:'KrisShop',aliases:['krisshop'],cat:'Shopping',mode:'online',sia:true}, {name:'Pelago',aliases:['pelago'],cat:'Travel',mode:'online',sia:true}, {name:'Foodpanda',aliases:['foodpanda'],cat:'Dining',mode:'online'}, {name:'Deliveroo',aliases:['deliveroo'],cat:'Dining',mode:'online'}, {name:'FairPrice',aliases:['fairprice','ntuc'],cat:'Groceries',mode:'store'}, {name:'Cold Storage',aliases:['cold storage','cs fresh'],cat:'Groceries',mode:'store'}, {name:'Giant',aliases:['giant'],cat:'Groceries',mode:'store'}, {name:'Sheng Siong',aliases:['sheng siong'],cat:'Groceries',mode:'store'}, {name:'Watsons',aliases:['watsons'],cat:'Shopping',mode:'store'}, {name:'Guardian',aliases:['guardian'],cat:'Shopping',mode:'store'}, {name:'Uniqlo',aliases:['uniqlo'],cat:'Shopping',mode:'store'}, {name:'Sushiro',aliases:['sushiro'],cat:'Dining',mode:'store'}, {name:'Don Don Donki',aliases:['don don donki','donki'],cat:'Groceries',mode:'store'}, {name:'Agoda',aliases:['agoda'],cat:'Travel',mode:'online'}, {name:'Booking.com',aliases:['booking.com','booking'],cat:'Travel',mode:'online'}, {name:'Trip.com',aliases:['trip.com'],cat:'Travel',mode:'online'}, {name:'Airbnb',aliases:['airbnb'],cat:'Travel',mode:'online'}];
+const wallets={C:["DBS Woman's World","Citi Rewards","HSBC Revolution","UOB Lady's Solitaire","UOB Preferred Visa","KrisFlyer UOB","Citi PremierMiles","Amex KrisFlyer","OCBC Rewards"],M:["Citi Rewards","UOB Lady's Solitaire","UOB Preferred Visa","DBS yuu"]};
+function findMerchant(q){q=q.toLowerCase().trim();return merchants.find(m=>m.aliases.some(a=>q===a))||merchants.find(m=>m.aliases.some(a=>a.includes(q)||q.includes(a)))}
+function ladyRate(){let v=+mab.value;return v>=100000?10:v>=50000?8:v>=10000?6:4}
+function score(card,m,method){let mpd=.4,cap=Infinity,note='Base earn';const online=method==='online'||(method==='auto'&&['online','app'].includes(m.mode)),mobile=method==='mobile',simply=method==='simplygo';
+if(card==="DBS Woman's World"&&online){mpd=4;cap=1000;note='4 mpd for eligible online spend'}
+if(card==='Citi Rewards'&&online&&m.cat!=='Travel'&&!mobile){mpd=4;cap=1000;note='4 mpd eligible online spend; travel excluded'}
+if(card==='HSBC Revolution'&&(online||mobile)&&['Dining','Travel','Shopping','Transport','Entertainment'].includes(m.cat)){mpd=4;cap=1000;note='4 mpd selected online/contactless category'}
+if(card==='UOB Preferred Visa'&&(mobile||simply||(online&&['Shopping','Entertainment'].includes(m.cat)))){mpd=4;cap=600;note='4 mpd eligible mobile/contactless or selected online spend'}
+if(card==="UOB Lady's Solitaire"){let pref=holder.value==='C'?['Dining','Travel']:['Dining','Family'];if(pref.includes(m.cat)){mpd=ladyRate();cap=750;note=mpd+' mpd in selected Lady’s category'}}
+if(card==='KrisFlyer UOB'){if(m.sia){mpd=3;note='3 mpd eligible SIA-group spend'}else if(['Dining','Travel','Transport','Shopping'].includes(m.cat)){mpd=2.4;note='2.4 mpd accelerated category, subject to annual SIA-group condition'}else{mpd=1.2;note='1.2 mpd general spend'}}
+if(card==='Citi PremierMiles'){mpd=1.2;note='1.2 mpd local general spend'}
+if(card==='Amex KrisFlyer'){mpd=m.sia?2:(m.name==='Grab'?2:1.2);note=m.sia?'2 mpd eligible SIA-group spend':m.name==='Grab'?'2 mpd eligible Grab spend':'1.2 mpd general spend'}
+if(card==='OCBC Rewards'&&m.cat==='Shopping'){mpd=4;cap=1000;note='4 mpd retail-category assumption; MCC eligibility applies'}
+if(card==='DBS yuu'&&['FairPrice','Cold Storage','Giant','Foodpanda'].includes(m.name)){mpd=2.8;note='2.8 mpd equivalent conservative yuu rate; higher rate requires monthly conditions'}
+let u=+used.value||0,rem=cap===Infinity?Infinity:Math.max(0,cap-u),amt=+amount.value||100,qual=cap===Infinity?amt:Math.min(amt,rem),miles=qual*mpd+(amt-qual)*.4;return{card,mpd,note,miles,rem,cap}}
+function render(){let q=merchant.value.trim();if(q.length<2){result.style.display='none';return}let m=findMerchant(q);if(!m){result.style.display='block';mname.textContent=q;cat.textContent='Unknown merchant';meta.textContent='Merchant not yet in local database';ask.style.display='block';ask.innerHTML='<b>I need one detail.</b><div class="muted">Choose the closest category below, then the engine can recommend a card.</div>'+['Dining','Shopping','Travel','Groceries','Transport'].map(c=>'<button onclick="temporary(\''+c+'\')">'+c+'</button>').join('');primary.innerHTML='<div class="muted">Waiting for merchant category.</div>';backup.innerHTML='';explain.innerHTML='Unknown merchants are not silently guessed because MCC/category errors can change the best card.';return}show(m)}
+function temporary(catg){show({name:merchant.value.trim(),cat:catg,mode:'store'})}
+function show(m){result.style.display='block';ask.style.display='none';mname.textContent=m.name;cat.textContent=m.cat;meta.textContent=m.mode==='online'?'Recognised as online merchant':m.mode==='app'?'Recognised as app-based merchant':'Recognised as primarily in-store';let method=payment.value;let rs=wallets[holder.value].map(c=>score(c,m,method)).sort((a,b)=>b.miles-a.miles||b.mpd-a.mpd),a=rs[0],b=rs[1],amt=+amount.value||0;primary.innerHTML='<div class="eyebrow">Use this card</div><div class="cardname">'+a.card+'</div><div><span class="mpd">'+a.mpd.toFixed(1)+' mpd</span>'+(amt?' · about <b>'+a.miles.toFixed(0)+' miles</b>':'')+'</div><div class="why">'+a.note+'</div>';backup.innerHTML='<b>Backup: '+b.card+'</b> — '+b.mpd.toFixed(1)+' mpd<div class="muted">'+b.note+'</div>';explain.innerHTML='The engine recognised <b>'+m.name+'</b> as <b>'+m.cat+'</b>, inferred the normal payment channel, then compared the cards in '+holder.value+'’s wallet after modelled bonus caps. Change Advanced settings only when the actual payment method or cap usage differs.'}
+function suggestions(){let q=merchant.value.toLowerCase().trim();if(!q){suggest.style.display='none';return}let ms=merchants.filter(m=>m.name.toLowerCase().includes(q)||m.aliases.some(a=>a.includes(q))).slice(0,6);suggest.innerHTML=ms.map(m=>'<div onclick="pick(\''+m.name.replaceAll("'","\\'")+'\')"><b>'+m.name+'</b><br><span class="muted">'+m.cat+'</span></div>').join('');suggest.style.display=ms.length?'block':'none'}
+function pick(n){merchant.value=n;suggest.style.display='none';render()} merchant.addEventListener('input',()=>{suggestions();render()});[holder,amount,payment,used,mab].forEach(e=>e.addEventListener('input',render));
 </script></body></html>

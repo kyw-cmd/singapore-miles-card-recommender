@@ -1,23 +1,14 @@
-# Singapore Miles Card Recommender
+# Which Card? — Singapore Miles Recommender v2
 
-A mobile-friendly static web app that recommends a credit card for a Singapore transaction based on expected miles.
+Merchant-first mobile web app. Type a merchant name and the recommendation updates immediately for C or M's card wallet.
 
-## Inputs
-- Cardholder (C or M)
-- Transaction amount and merchant
-- Spend category
-- Online vs in-store channel
-- Payment method
-- Local vs foreign currency
-- Optional MCC
-- Bonus-cap spend already used
-- UOB Lady's Savings Account MAB
+## Improvements over v1
+- Merchant autocomplete and recognition
+- Real-time recommendation while typing
+- Category/payment-channel inference
+- Primary + backup card with expected mpd/miles
+- Ambiguity handling for unknown merchants
+- Advanced assumptions hidden by default
+- Mobile-first UI
 
-## Output
-The app ranks the available cards, shows a primary and backup recommendation, estimates miles, flags relevant caps/caveats, and links to issuer sources.
-
-## Deploy
-This repository is a static site. No build command or framework is required. Import the repository into Vercel and deploy from the repository root.
-
-## Important
-Reward rates, MCC treatment, exclusions, monthly caps and promotions can change. Confirm high-value transactions against the issuer's current terms and conditions.
+Static site: no build command required. Deploy the repository root to Vercel.
